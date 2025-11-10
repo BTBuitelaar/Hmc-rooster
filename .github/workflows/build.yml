@@ -3,7 +3,7 @@ name: Build iCal
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 * * * *"   # every hour
+    - cron: "0 * * * *"
 
 permissions:
   contents: read
@@ -22,9 +22,8 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install dependencies and Playwright browsers
+      - name: Install Playwright browsers
         run: |
-          npm ci || npm install
           npx playwright install --with-deps chromium
 
       - name: Run scraper
@@ -32,15 +31,13 @@ jobs:
           MYX_USERNAME: ${{ secrets.MYX_USERNAME }}
           MYX_PASSWORD: ${{ secrets.MYX_PASSWORD }}
           MYX_WEEKS: ${{ vars.MYX_WEEKS || 8 }}
-        run: |
-          echo "Running scraper..."
-          node scrape.js
+        run: node scrape.js
 
       - name: Prepare site for deployment
         run: |
           mkdir -p dist
           cp rooster.ics dist/rooster.ics
-          echo "<h1>HMC Rooster</h1><p><a href='rooster.ics'>Download ICS</a></p>" > dist/index.html
+          echo "<h1>HMC Rooster</h1><p><a href='rooster.ics'>Download ICS</a></p>" > dist/index.html
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
