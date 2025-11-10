@@ -13,7 +13,6 @@ function monthFrom(nl) {
   }
   return null;
 }
-
 function dedupe(arr) {
   const seen = new Set();
   const out = [];
@@ -27,14 +26,12 @@ function dedupe(arr) {
   out.sort((a,b) => a.start - b.start);
   return out;
 }
-
 async function parseVisibleWeek(page) {
   return await page.evaluate(() => {
     const nodes = Array.from(document.querySelectorAll('div.k-event[aria-label]'));
     return nodes.map(el => el.getAttribute('aria-label'));
   });
 }
-
 function parseAriaLabels(labels) {
   const events = [];
   for (const a of labels) {
@@ -62,7 +59,7 @@ function parseAriaLabels(labels) {
       location = room ? `${site} - ${room}` : site;
     }
     const start = new Date(y, mo - 1, d, sh, sm, 0);
-    const end = new Date(y, mo - 1, d, eh, em, 0);
+    const end   = new Date(y, mo - 1, d, eh, em, 0);
     if (!isNaN(+start) && !isNaN(+end)) {
       events.push({ start, end, title: title || 'Les', location });
     }
@@ -70,9 +67,10 @@ function parseAriaLabels(labels) {
   return dedupe(events);
 }
 
+// Main wrapper with error logging and longer timeout
 (async () => {
   try {
-    const weeks = Number(process.env.MYX_WEEKS || 8);
+    const weeks    = Number(process.env.MYX_WEEKS || 8);
     const username = process.env.MYX_USERNAME;
     const password = process.env.MYX_PASSWORD;
 
@@ -82,17 +80,20 @@ function parseAriaLabels(labels) {
     }
 
     const browser = await chromium.launch({ headless: true });
-    const ctx = await browser.newContext();
-    const page = await ctx.newPage();
+    const ctx     = await browser.newContext();
+    const page    = await ctx.newPage();
 
+    // Navigate to MyX
     await page.goto('https://hmcollege.myx.nl/roster/overview/schedule/mine', { waitUntil: 'domcontentloaded' });
 
+    // Some institutions ask for an identifier first (SURF login).
     const maybePicker = await page.locator('input[name="userId"]').first();
     if (await maybePicker.count()) {
       await maybePicker.fill(username);
       await maybePicker.press('Enter');
     }
 
+    // Fill username/password on the actual login page
     const userField = page.locator('input[type="email"], input[name="username"], input#username').first();
     const passField = page.locator('input[type="password"], input#password').first();
     if (await userField.count()) await userField.fill(username);
@@ -101,16 +102,21 @@ function parseAriaLabels(labels) {
       await passField.press('Enter');
     }
 
-    await page.waitForSelector('kendo-scheduler, .k-scheduler', { timeout: 60000 });
+    // Increase the timeout to 120 seconds for slow page loads
+    await page.waitForSelector('kendo-scheduler, .k-scheduler', { timeout: 120000 });
 
     let all = [];
     for (let i = 0; i < weeks; i++) {
-      await page.waitForTimeout(800);
+      // Wait a bit for events to render
+      await page.waitForTimeout(1000);
       const labels = await parseVisibleWeek(page);
       all = dedupe(all.concat(parseAriaLabels(labels)));
+
+      // Click to next week if available
       if (i < weeks - 1) {
-        const nextBtn = await page.$('button[data-cy="next-button"]') ||
-                        await page.$('kendo-scheduler-toolbar button.k-button[aria-label*="Volgende"]');
+        const nextBtn =
+          await page.$('button[data-cy="next-button"]') ||
+          await page.$('kendo-scheduler-toolbar button.k-button[aria-label*="Volgende"]');
         if (!nextBtn) break;
         await nextBtn.click();
       }
