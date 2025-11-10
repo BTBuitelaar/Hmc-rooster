@@ -22,8 +22,9 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install Playwright browsers
+      - name: Install dependencies
         run: |
+          npm install
           npx playwright install --with-deps chromium
 
       - name: Run scraper
@@ -37,7 +38,7 @@ jobs:
         run: |
           mkdir -p dist
           cp rooster.ics dist/rooster.ics
-          echo "<h1>HMC Rooster</h1><p><a href='rooster.ics'>Download ICS</a></p>" > dist/index.html
+          echo "<h1>HMC Rooster</h1><p><a href='rooster.ics'>Download&nbsp;ICS</a></p>" > dist/index.html
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
