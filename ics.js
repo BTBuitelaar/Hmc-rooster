@@ -11,8 +11,7 @@ function buildICS(events, tz='Europe/Amsterdam'){
     'METHOD:PUBLISH','PRODID:-//HMC//Rooster Export//NL'
   ];
   for (const e of events) {
-    const uid = `${+e.start}-${(e.title+'|'+(e.location||''))\
-      .replace(/\s+/g,'_')}@hmc`;
+    const uid = `${+e.start}-${(e.title + '|' + (e.location || '')).replace(/\s+/g,'_')}@hmc`;
     lines.push(
       'BEGIN:VEVENT',
       `UID:${uid}`,
