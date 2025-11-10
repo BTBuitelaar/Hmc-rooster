@@ -13,6 +13,7 @@ function monthFrom(nl) {
   }
   return null;
 }
+
 function dedupe(arr) {
   const seen = new Set();
   const out = [];
@@ -26,108 +27,72 @@ function dedupe(arr) {
   out.sort((a,b) => a.start - b.start);
   return out;
 }
+
 async function parseVisibleWeek(page) {
   return await page.evaluate(() => {
     const nodes = Array.from(document.querySelectorAll('div.k-event[aria-label]'));
     return nodes.map(el => el.getAttribute('aria-label'));
   });
 }
+
 function parseAriaLabels(labels) {
   const events = [];
-  for (const a of labels) {
-    const m = a.match(WHEN);
+  for (const label of labels) {
+    const m = label.match(WHEN);
     if (!m) continue;
-    const d = +m[2];
-    const mo = monthFrom(m[3]);
-    if (!mo) continue;
-    const y = +m[4];
-    const [sh, sm] = m[5].split(':').map(Number);
-    const [eh, em] = m[6].split(':').map(Number);
-    const after = a.split(m[0])[1] || '';
-    const t1 = after.match(/\b(?:les|examen)\s+([^,]+)/i);
-    let title = t1 ? t1[1].trim() : '';
-    if (!title) {
-      const t2 = a.match(/,\s*(?:les|examen)\s+([^,]+)/i);
-      if (t2) title = t2[1].trim();
-    }
-    title = title.replace(/^(les|examen?)\s+/i, '');
-    let location = '';
-    const locm = a.match(/faciliteit\s+([^,]+?)(?:\s*-\s*([A-Z]?\d{1,4}[A-Z]?))?(?:,|$)/i);
-    if (locm) {
-      const site = (locm[1] || '').trim();
-      const room = (locm[2] || '').trim();
-      location = room ? `${site} - ${room}` : site;
-    }
-    const start = new Date(y, mo - 1, d, sh, sm, 0);
-    const end   = new Date(y, mo - 1, d, eh, em, 0);
-    if (!isNaN(+start) && !isNaN(+end)) {
-      events.push({ start, end, title: title || 'Les', location });
-    }
+    const [, day, d, monthNL, y, startT, endT] = m;
+    const month = monthFrom(monthNL);
+    if (!month) continue;
+    const start = new Date(`${y}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}T${startT}`);
+    const end = new Date(`${y}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}T${endT}`);
+    const title = label.split(',')[1]?.trim() || 'Les';
+    const location = label.split(' - ').pop()?.trim() || '';
+    events.push({ start, end, title, location });
   }
-  return dedupe(events);
+  return events;
 }
 
-// Main wrapper with error logging and longer timeout
 (async () => {
-  try {
-    const weeks    = Number(process.env.MYX_WEEKS || 8);
-    const username = process.env.MYX_USERNAME;
-    const password = process.env.MYX_PASSWORD;
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
 
-    if (!username || !password) {
-      console.error('Missing MYX_USERNAME or MYX_PASSWORD');
-      process.exit(1);
+  console.log('Opening MyX login page...');
+  await page.goto('https://myx.hmc.nl/');
+  await page.waitForSelector('input[name="username"]');
+
+  console.log('Logging in...');
+  await page.fill('input[name="username"]', process.env.MYX_USERNAME);
+  await page.fill('input[name="password"]', process.env.MYX_PASSWORD);
+  await page.click('button[type="submit"]');
+
+  // Wait for main page load
+  await page.waitForLoadState('networkidle');
+
+  // 🆕 After login: open view dropdown and select “Week”
+  const viewButton = await page.$('button[aria-label="Open rooster opties"]');
+  if (viewButton) {
+    await viewButton.click();
+    const weekOption = await page.$('button:has-text("Week")');
+    if (weekOption) {
+      console.log('Switching to Week view...');
+      await weekOption.click();
+    } else {
+      console.log('Week option not found — continuing...');
     }
-
-    const browser = await chromium.launch({ headless: true });
-    const ctx     = await browser.newContext();
-    const page    = await ctx.newPage();
-
-    // Navigate to MyX
-    await page.goto('https://hmcollege.myx.nl/roster/overview/schedule/mine', { waitUntil: 'domcontentloaded' });
-
-    // Some institutions ask for an identifier first (SURF login).
-    const maybePicker = await page.locator('input[name="userId"]').first();
-    if (await maybePicker.count()) {
-      await maybePicker.fill(username);
-      await maybePicker.press('Enter');
-    }
-
-    // Fill username/password on the actual login page
-    const userField = page.locator('input[type="email"], input[name="username"], input#username').first();
-    const passField = page.locator('input[type="password"], input#password').first();
-    if (await userField.count()) await userField.fill(username);
-    if (await passField.count()) {
-      await passField.fill(password);
-      await passField.press('Enter');
-    }
-
-    // Increase the timeout to 120 seconds for slow page loads
-    await page.waitForSelector('kendo-scheduler, .k-scheduler', { timeout: 120000 });
-
-    let all = [];
-    for (let i = 0; i < weeks; i++) {
-      // Wait a bit for events to render
-      await page.waitForTimeout(1000);
-      const labels = await parseVisibleWeek(page);
-      all = dedupe(all.concat(parseAriaLabels(labels)));
-
-      // Click to next week if available
-      if (i < weeks - 1) {
-        const nextBtn =
-          await page.$('button[data-cy="next-button"]') ||
-          await page.$('kendo-scheduler-toolbar button.k-button[aria-label*="Volgende"]');
-        if (!nextBtn) break;
-        await nextBtn.click();
-      }
-    }
-
-    const ics = buildICS(all);
-    fs.writeFileSync('rooster.ics', ics, 'utf8');
-    console.log(`Generated ${all.length} events into rooster.ics`);
-    await browser.close();
-  } catch (err) {
-    console.error(err);
-    process.exit(1);
+  } else {
+    console.log('No view button found — continuing...');
   }
+
+  // scrape visible data
+  console.log('Scraping schedule...');
+  const rawLabels = await parseVisibleWeek(page);
+  const events = parseAriaLabels(rawLabels);
+  const deduped = dedupe(events);
+
+  console.log(`Found ${deduped.length} unique events. Generating ICS...`);
+  const icsData = buildICS(deduped);
+  fs.writeFileSync('rooster.ics', icsData);
+
+  console.log('ICS file saved as rooster.ics');
+  await browser.close();
 })();
